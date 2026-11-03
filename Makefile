@@ -1,10 +1,8 @@
-BGA_USER   := maksskv
-BGA_HOST   := 1.studio.boardgamearena.com
-BGA_PORT   := 2022
-BGA_GAME   := krestiki
-BGA_REMOTE := $(BGA_GAME)
-BGA_KEY    := $(HOME)/.ssh/id_rsa_bga
-BGA_SCP    := scp -i $(BGA_KEY) -P $(BGA_PORT) -o IdentitiesOnly=yes
+# Deploy uses password auth via .vscode/sftp.json (read by misc/bga_sftp.py).
+# Alternative once the SSH key is registered in BGA Studio: scp -i ~/.ssh/id_rsa_bga -P 2022 -o IdentitiesOnly=yes
+BGA_PY         := $(HOME)/.bga-tools/venv/bin/python
+BGA_SFTP       := misc/bga_sftp.py
+BGA_REMOTE_DIR := /krestiki
 
 # Config files: keep the extension the scaffold shipped (.jsonc here)
 DEPLOY_ROOT   := dbmodel.sql $(wildcard gameinfos.jsonc gameinfos.inc.php stats.json stats.jsonc gameoptions.json gameoptions.jsonc gamepreferences.json gamepreferences.jsonc)
@@ -17,10 +15,9 @@ check:
 	@echo "✓ PHP OK"
 
 deploy: check
-	$(BGA_SCP) $(DEPLOY_ROOT) $(BGA_USER)@$(BGA_HOST):$(BGA_REMOTE)/
-	$(BGA_SCP) krestiki.css $(BGA_USER)@$(BGA_HOST):$(BGA_REMOTE)/krestiki.css
-	$(BGA_SCP) $(DEPLOY_PHP) $(BGA_USER)@$(BGA_HOST):$(BGA_REMOTE)/modules/php/
-	$(BGA_SCP) $(DEPLOY_STATES) $(BGA_USER)@$(BGA_HOST):$(BGA_REMOTE)/modules/php/States/
-	$(BGA_SCP) $(DEPLOY_JS) $(BGA_USER)@$(BGA_HOST):$(BGA_REMOTE)/modules/js/
-	$(BGA_SCP) img/* $(BGA_USER)@$(BGA_HOST):$(BGA_REMOTE)/img/
+	$(BGA_PY) $(BGA_SFTP) put $(DEPLOY_ROOT) krestiki.css $(BGA_REMOTE_DIR)/
+	$(BGA_PY) $(BGA_SFTP) put $(DEPLOY_PHP) $(BGA_REMOTE_DIR)/modules/php/
+	$(BGA_PY) $(BGA_SFTP) put $(DEPLOY_STATES) $(BGA_REMOTE_DIR)/modules/php/States/
+	$(BGA_PY) $(BGA_SFTP) put $(DEPLOY_JS) $(BGA_REMOTE_DIR)/modules/js/
+	$(BGA_PY) $(BGA_SFTP) put img/* $(BGA_REMOTE_DIR)/img/
 	@echo "✓ Deployed"
