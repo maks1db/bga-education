@@ -23,9 +23,24 @@ def load_config():
 
 def connect():
     cfg = load_config()
-    t = paramiko.Transport((cfg["host"], int(cfg.get("port", 22))))
-    t.connect(username=cfg["username"], password=cfg["password"])
-    return paramiko.SFTPClient.from_transport(t)
+    client = paramiko.SSHClient()
+    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    kwargs = dict(
+        hostname=cfg["host"],
+        port=int(cfg.get("port", 22)),
+        username=cfg["username"],
+        timeout=15,
+        allow_agent=False,
+        look_for_keys=False,
+    )
+    if cfg.get("privateKeyPath"):
+        kwargs["key_filename"] = os.path.expanduser(cfg["privateKeyPath"])
+    elif cfg.get("password"):
+        kwargs["password"] = cfg["password"]
+    else:
+        kwargs["allow_agent"] = kwargs["look_for_keys"] = True
+    client.connect(**kwargs)
+    return client.open_sftp()
 
 
 def cmd_ls(sftp, path):
