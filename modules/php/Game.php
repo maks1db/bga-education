@@ -19,53 +19,26 @@ declare(strict_types=1);
 namespace Bga\Games\Krestiki;
 
 use Bga\Games\Krestiki\States\PlayerTurn;
-use Bga\GameFramework\Components\Counters\PlayerCounter;
+use Bga\GameFramework\Table;
 
-class Game extends \Bga\GameFramework\Table
+class Game extends Table
 {
-    public static array $CARD_TYPES;
+    public const BOARD_CELLS = 9;
 
-    public PlayerCounter $playerEnergy;
+    public const WIN_LINES = [
+        [0, 1, 2],
+        [3, 4, 5],
+        [6, 7, 8],
+        [0, 3, 6],
+        [1, 4, 7],
+        [2, 5, 8],
+        [0, 4, 8],
+        [2, 4, 6],
+    ];
 
-    /**
-     * Your global variables labels:
-     *
-     * Here, you can assign labels to global variables you are using for this game. You can use any number of global
-     * variables with IDs between 10 and 99. If you want to store any type instead of int, use $this->globals instead.
-     *
-     * NOTE: afterward, you can get/set the global variables with `getGameStateValue`, `setGameStateInitialValue` or
-     * `setGameStateValue` functions.
-     */
     public function __construct()
     {
         parent::__construct();
-
-        $this->playerEnergy = $this->bga->counterFactory->createPlayerCounter('energy');
-
-        self::$CARD_TYPES = [
-            1 => [
-                "card_name" => clienttranslate('Troll'), // ...
-            ],
-            2 => [
-                "card_name" => clienttranslate('Goblin'), // ...
-            ],
-            // ...
-        ];
-
-        /* example of notification decorator.
-        // automatically complete notification args when needed
-        $this->bga->notify->addDecorator(function(string $message, array $args) {
-            if (isset($args['player_id']) && !isset($args['player_name']) && str_contains($message, '${player_name}')) {
-                $args['player_name'] = $this->getPlayerNameById($args['player_id']);
-            }
-        
-            if (isset($args['card_id']) && !isset($args['card_name']) && str_contains($message, '${card_name}')) {
-                $args['card_name'] = self::$CARD_TYPES[$args['card_id']]['card_name'];
-                $args['i18n'][] = ['card_name'];
-            }
-            
-            return $args;
-        });*/
     }
 
     /**
@@ -79,9 +52,10 @@ class Game extends \Bga\GameFramework\Table
      */
     public function getGameProgression()
     {
-        // TODO: compute and return the game progression
+        $board = $this->getBoard();
+        $filled = count(array_filter($board));
 
-        return 0;
+        return (int) round($filled / count($board) * 100);
     }
 
     /**
@@ -97,21 +71,6 @@ class Game extends \Bga\GameFramework\Table
      */
     public function upgradeTableDb($from_version)
     {
-//       if ($from_version <= 1404301345)
-//       {
-//            // ! important ! Use `DBPREFIX_<table_name>` for all tables
-//
-//            $sql = "ALTER TABLE `DBPREFIX_xxxxxxx` ....";
-//            $this->applyDbUpgradeToAllDB( $sql );
-//       }
-//
-//       if ($from_version <= 1405061421)
-//       {
-//            // ! important ! Use `DBPREFIX_<table_name>` for all tables
-//
-//            $sql = "CREATE TABLE `DBPREFIX_xxxxxxx` ....";
-//            $this->applyDbUpgradeToAllDB( $sql );
-//       }
     }
 
     /*
@@ -122,21 +81,15 @@ class Game extends \Bga\GameFramework\Table
      * - when the game starts
      * - when a player refreshes the game page (F5)
      */
-    protected function getAllDatas(int $currentPlayerId): array
+    public function getAllDatas(int $currentPlayerId): array
     {
-        $result = [];
-        // WARNING: We must only return information visible by the current player (using $currentPlayerId).
-
-        // Get information about players.
-        // NOTE: you can retrieve some extra field you added for "player" table in `dbmodel.sql` if you need it.
-        $result["players"] = $this->getCollectionFromDb(
-            "SELECT `player_id` AS `id`, `player_score` AS `score` FROM `player`"
-        );
-        $this->playerEnergy->fillResult($result);
-
-        // TODO: Gather all information about current game situation (visible by player $currentPlayerId).
-
-        return $result;
+        return [
+            'players' => $this->getCollectionFromDb(
+                "SELECT `player_id` AS `id`, `player_score` AS `score`, `player_color` AS `color`, `player_name` AS `name` FROM `player`"
+            ),
+            'board' => $this->getBoard(),
+            'symbols' => $this->getPlayerSymbols(),
+        ];
     }
 
     /**
@@ -145,52 +98,135 @@ class Game extends \Bga\GameFramework\Table
      */
     protected function setupNewGame($players, $options = [])
     {
-        $this->playerEnergy->initDb(array_keys($players), initialValue: 2);
-
-        // Set the colors of the players with HTML color code. The default below is red/green/blue/orange/brown. The
-        // number of colors defined here must correspond to the maximum number of players allowed for the gams.
         $gameinfos = $this->getGameinfos();
         $default_colors = $gameinfos['player_colors'];
 
         foreach ($players as $player_id => $player) {
-            // Now you can access both $player_id and $player array
             $query_values[] = vsprintf("(%s, '%s', '%s')", [
                 $player_id,
                 array_shift($default_colors),
-                addslashes($player["player_name"]),
+                addslashes($player['player_name']),
             ]);
         }
 
-        // Create players based on generic information.
-        //
-        // NOTE: You can add extra field on player table in the database (see dbmodel.sql) and initialize
-        // additional fields directly here.
         static::DbQuery(
             sprintf(
                 "INSERT INTO `player` (`player_id`, `player_color`, `player_name`) VALUES %s",
-                implode(",", $query_values)
+                implode(',', $query_values)
             )
         );
 
-        $this->reattributeColorsBasedOnPreferences($players, $gameinfos["player_colors"]);
+        $this->reattributeColorsBasedOnPreferences($players, $gameinfos['player_colors']);
         $this->reloadPlayersBasicInfos();
 
-        // Init global values with their initial values.
+        $this->bga->globals->set('board', array_fill(0, self::BOARD_CELLS, 0));
+        $this->bga->globals->set('x_player_id', (int) array_key_first($players));
 
-        // Init game statistics.
-        //
-        // NOTE: statistics used in this file must be defined in your `stats.inc.php` file.
+        $this->bga->tableStats->init('moves', 0);
+        $this->bga->playerStats->init('turns_played', 0);
 
-        // Dummy content.
-        // $this->tableStats->init('table_teststat1', 0);
-        // $this->playerStats->init('player_teststat1', 0);
-
-        // TODO: Setup the initial game situation here.
-
-        // Activate first player once everything has been initialized and ready.
         $this->activeNextPlayer();
 
         return PlayerTurn::class;
+    }
+
+    public function getBoard(): array
+    {
+        $board = $this->bga->globals->get('board', array_fill(0, self::BOARD_CELLS, 0));
+
+        return array_map('intval', $board);
+    }
+
+    public function getPlayableCells(?array $board = null): array
+    {
+        $board = $board ?? $this->getBoard();
+        $cells = [];
+        foreach ($board as $cell => $owner) {
+            if ($owner === 0) {
+                $cells[] = $cell;
+            }
+        }
+
+        return $cells;
+    }
+
+    public function isBoardFull(?array $board = null): bool
+    {
+        return count($this->getPlayableCells($board)) === 0;
+    }
+
+    /**
+     * Returns the player_id of the winner, or null if no winning line is complete.
+     */
+    public function getWinner(?array $board = null): ?int
+    {
+        $board = $board ?? $this->getBoard();
+        foreach (self::WIN_LINES as $line) {
+            [$a, $b, $c] = $line;
+            if ($board[$a] !== 0 && $board[$a] === $board[$b] && $board[$b] === $board[$c]) {
+                return $board[$a];
+            }
+        }
+
+        return null;
+    }
+
+    public function getPlayerSymbol(int $playerId): string
+    {
+        return $this->getXPlayerId() === $playerId ? 'X' : 'O';
+    }
+
+    public function getPlayerSymbols(): array
+    {
+        $symbols = [];
+        foreach ($this->getPlayerIds() as $playerId) {
+            $symbols[$playerId] = $this->getPlayerSymbol($playerId);
+        }
+
+        return $symbols;
+    }
+
+    public function getXPlayerId(): int
+    {
+        return (int) $this->bga->globals->get('x_player_id');
+    }
+
+    /**
+     * @return int[]
+     */
+    public function getPlayerIds(): array
+    {
+        return array_map('intval', array_keys($this->loadPlayersBasicInfos()));
+    }
+
+    public function getOpponentId(int $playerId): int
+    {
+        foreach ($this->getPlayerIds() as $id) {
+            if ($id !== $playerId) {
+                return $id;
+            }
+        }
+
+        throw new \LogicException("No opponent found for player $playerId");
+    }
+
+    /**
+     * [A3] Win = 2, loss = 0.
+     */
+    public function endGameWithWinner(int $winnerId): void
+    {
+        $this->bga->playerScore->set($winnerId, 2);
+        $this->bga->playerScore->set($this->getOpponentId($winnerId), 0);
+    }
+
+    /**
+     * [A3] Draw = 1 for both players.
+     */
+    public function endGameWithDraw(): void
+    {
+        foreach ($this->getPlayerIds() as $playerId) {
+            $this->bga->playerScore->set($playerId, 1);
+        }
     }
 
     /**
@@ -198,17 +234,11 @@ class Game extends \Bga\GameFramework\Table
      * Here, jump to a state you want to test (by default, jump to next player state)
      * You can trigger it on Studio using the Debug button on the right of the top bar.
      */
-    public function debug_goToState(int $state = 3) {
+    public function debug_goToState(int $state = 3)
+    {
+        if ($this->getBgaEnvironment() !== 'studio') {
+            return;
+        }
         $this->gamestate->jumpToState($state);
     }
-
-    /*
-    Another example of debug function, to easily create situations you want to test.
-    Here, put a card you want to test in your hand (assuming you use the Deck component).
-
-    public function debug_setCardInHand(int $cardType, int $playerId) {
-        $card = array_values($this->cards->getCardsOfType($cardType))[0];
-        $this->cards->moveCard($card['id'], 'hand', $playerId);
-    }
-    */
 }

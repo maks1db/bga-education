@@ -5,12 +5,12 @@ declare(strict_types=1);
 namespace Bga\Games\Krestiki\States;
 
 use Bga\GameFramework\StateType;
+use Bga\GameFramework\States\GameState;
 use Bga\Games\Krestiki\Game;
 
-class NextPlayer extends \Bga\GameFramework\States\GameState
+class NextPlayer extends GameState
 {
-
-    function __construct(
+    public function __construct(
         protected Game $game,
     ) {
         parent::__construct($game,
@@ -21,23 +21,21 @@ class NextPlayer extends \Bga\GameFramework\States\GameState
     }
 
     /**
-     * Game state action, example content.
+     * Game state action.
      *
-     * The onEnteringState method of state `nextPlayer` is called everytime the current game state is set to `nextPlayer`.
+     * The onEnteringState method of state `NextPlayer` is called everytime the current game state is set to `NextPlayer`.
      */
-    function onEnteringState(int $activePlayerId) {
-
-        // Give some extra time to the active player when he completed an action
+    public function onEnteringState(int $activePlayerId)
+    {
         $this->game->giveExtraTime($activePlayerId);
-        
+
+        if ($this->game->isBoardFull()) {
+            $this->game->endGameWithDraw();
+            return EndScore::class;
+        }
+
         $this->game->activeNextPlayer();
 
-        // Go to another gamestate
-        $gameEnd = false; // Here, we would detect if the game is over to make the appropriate transition
-        if ($gameEnd) {
-            return EndScore::class;
-        } else {
-            return PlayerTurn::class;
-        }
+        return PlayerTurn::class;
     }
 }
