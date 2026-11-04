@@ -6,24 +6,17 @@
  * This code has been produced on the BGA studio platform for use on http://boardgamearena.com.
  * See http://en.boardgamearena.com/#!doc/Studio for more information.
  * -----
- * 
+ *
  * In this file, you are describing the logic of your user interface, in Javascript language.
  *
  */
 
 /**
- * @typedef {Player & {
- *   energy: number
- * }} KrestikiPlayer
+ * @typedef {Object} PlayerTurnArgs
+ * @property {number[]} playableCells
  */
-/**
- * @typedef {Gamedatas<KrestikiPlayer> & {
- * }} KrestikiGamedatas
- */
-/**
-* @typedef {Object} PlayerTurnArgs
-* @property {number[]} playableCardsIds
-*/
+
+const SYMBOL_GLYPHS = { X: '✕', O: '◯' };
 
 /**
  * We create one State class per declared state on the PHP side, to handle all state specific code here.
@@ -45,60 +38,40 @@ class PlayerTurn {
 
     /**
      * This method is called each time we are entering the game state. You can use this method to perform some user interface changes at this moment.
-     * 
-     * @param {PlayerTurnArgs} args 
-     * @param {boolean} isCurrentPlayerActive 
+     *
+     * @param {PlayerTurnArgs} args
+     * @param {boolean} isCurrentPlayerActive
      */
     onEnteringState(args, isCurrentPlayerActive) {
-        this.bga.statusBar.setTitle(isCurrentPlayerActive ? 
-            _('${you} must play a card or pass') :
-            _('${actplayer} must play a card or pass')
+        this.bga.statusBar.setTitle(isCurrentPlayerActive ?
+            _('${you} must place a piece') :
+            _('${actplayer} must place a piece')
         );
-      
+
         if (isCurrentPlayerActive) {
-            const playableCardsIds = args.playableCardsIds; // returned by the PlayerTurn::getArgs
-
-            // Add test action buttons in the action status bar, simulating a card click:
-            playableCardsIds.forEach(
-                cardId => this.bga.statusBar.addActionButton(_('Play card with id ${card_id}').replace('${card_id}', `${cardId}`), () => this.onCardClick(cardId))
-            ); 
-
-            this.bga.statusBar.addActionButton(_('Pass'), () => this.bga.actions.performAction("actPass"), { color: 'secondary' }); 
+            this.game.highlightPlayable(args.playableCells);
         }
     }
 
     /**
      * This method is called each time we are leaving the game state. You can use this method to perform some user interface changes at this moment.
-     * 
-     * @param {PlayerTurnArgs} args 
-     * @param {boolean} isCurrentPlayerActive 
+     *
+     * @param {PlayerTurnArgs} args
+     * @param {boolean} isCurrentPlayerActive
      */
     onLeavingState(args, isCurrentPlayerActive) {
+        this.game.clearHighlights();
     }
 
     /**
      * This method is called each time the current player becomes active or inactive in a MULTIPLE_ACTIVE_PLAYER state. You can use this method to perform some user interface changes at this moment.
      * on MULTIPLE_ACTIVE_PLAYER states, you may want to call this function in onEnteringState using `this.onPlayerActivationChange(args, isCurrentPlayerActive)` at the end of onEnteringState.
      * If your state is not a MULTIPLE_ACTIVE_PLAYER one, you can delete this function.
-     * 
-     * @param {PlayerTurnArgs} args 
-     * @param {boolean} isCurrentPlayerActive 
+     *
+     * @param {PlayerTurnArgs} args
+     * @param {boolean} isCurrentPlayerActive
      */
     onPlayerActivationChange(args, isCurrentPlayerActive) {
-    }
-
-    /**
-     * @param {number} card_id 
-     */
-    onCardClick(card_id) {
-        console.log('onCardClick', card_id);
-
-        this.bga.actions.performAction("actPlayCard", { 
-            card_id,
-        }).then(() =>  {                
-            // What to do after the server call if it succeeded
-            // (most of the time, nothing, as the game will react to notifs / change of state instead, so you can delete the `then`)
-        });        
     }
 }
 
@@ -111,113 +84,131 @@ export class Game {
         this.bga = bga;
 
         // Declare the State classes
-        this.playerTurn = new PlayerTurn(this, bga);
-        this.bga.states.register('PlayerTurn', this.playerTurn);
+        this.bga.states.register('PlayerTurn', new PlayerTurn(this, bga));
 
         // Uncomment the next line to show debug informations about state changes in the console. Remove before going to production!
         // this.bga.states.logger = console.log;
-            
-        // Here, you can init the global variables of your user interface
-        // Example:
-        // this.myGlobalValue = 0;
     }
-    
+
     /*
         setup:
-        
+
         This method must set up the game user interface according to current game situation specified
         in parameters.
-        
+
         The method is called each time the game interface is displayed to a player, ie:
         _ when the game starts
         _ when a player refreshes the game page (F5)
-        
+
         "gamedatas" argument contains all datas retrieved by your "getAllDatas" PHP method.
     */
-    
+
     /**
-     * @param {KrestikiGamedatas} gamedatas
+     * @param {Gamedatas} gamedatas
      */
     setup(gamedatas) {
-        console.log("Starting game setup", gamedatas);
+        console.log('Starting game setup', gamedatas);
         this.gamedatas = gamedatas;
 
-        // Example to add a div on the game area
-        this.bga.gameArea.getElement().insertAdjacentHTML('beforeend', `
-            <div id="player-tables"></div>
-        `);
-        
-        // Setting up player boards
-        Object.values(gamedatas.players).forEach(player => {
-            // example of setting up players boards
-            this.bga.playerPanels.getElement(Number(player.id)).insertAdjacentHTML('beforeend', `
-                <span id="energy-player-counter-${player.id}"></span> Energy
-            `);
-            const counter = new ebg.counter();
-            counter.create(`energy-player-counter-${player.id}`, {
-                value: player.energy,
-                playerCounter: 'energy',
-                playerId: Number(player.id)
-            });
+        this.bga.gameArea.getElement().insertAdjacentHTML('beforeend', '<div id="krestiki-board"></div>');
+        const board = document.getElementById('krestiki-board');
+        for (let cell = 0; cell < gamedatas.board.length; cell++) {
+            board.insertAdjacentHTML('beforeend', `<div class="krestiki-cell" id="krestiki-cell-${cell}" data-cell="${cell}"></div>`);
+        }
+        this.renderBoard();
 
-            // example of adding a div for each player
-            document.getElementById('player-tables').insertAdjacentHTML('beforeend', `
-                <div id="player-table-${player.id}">
-                    <strong>${player.name}</strong>
-                    <div>Player zone content goes here</div>
-                </div>
+        // One click funnel for the whole board (see references/tutorial-ready.md)
+        board.addEventListener('click', (e) => this.onBoardClick(e));
+
+        // Symbol badge on each player panel (X plays first)
+        Object.values(gamedatas.players).forEach(player => {
+            this.bga.playerPanels.getElement(Number(player.id)).insertAdjacentHTML('beforeend', `
+                <div class="krestiki-symbol-badge">${SYMBOL_GLYPHS[gamedatas.symbols[player.id]] ?? ''}</div>
             `);
         });
-        
-        // TODO: Set up your game interface here, according to "gamedatas"
-        
 
         // Setup game notifications to handle (see "setupNotifications" method below)
         this.setupNotifications();
 
-        console.log( "Ending game setup" );
+        console.log('Ending game setup');
     }
 
     ///////////////////////////////////////////////////
     //// Utility methods
-    
-    /*
-    
-        Here, you can defines some utility methods that you can use everywhere in your javascript
-        script. Typically, functions that are used in multiple state classes or outside a state class.
-    
-    */
 
-    
+    renderBoard() {
+        this.gamedatas.board.forEach((owner, cell) => {
+            this.renderCell(cell, Number(owner));
+        });
+        this.clearHighlights();
+    }
+
+    renderCell(cell, owner) {
+        const el = document.getElementById(`krestiki-cell-${cell}`);
+        if (!el) {
+            return;
+        }
+        el.dataset.owner = owner;
+        if (owner === 0) {
+            el.innerHTML = '';
+            return;
+        }
+        const color = this.gamedatas.players[owner]?.color ?? 'ffffff';
+        const symbol = this.gamedatas.symbols[owner] ?? 'X';
+        el.innerHTML = `<span class="krestiki-mark" style="color:#${color}">${SYMBOL_GLYPHS[symbol]}</span>`;
+    }
+
+    highlightPlayable(cells) {
+        cells.forEach(cell => document.getElementById(`krestiki-cell-${cell}`)?.classList.add('krestiki-playable'));
+    }
+
+    clearHighlights() {
+        document.querySelectorAll('.krestiki-playable').forEach(el => el.classList.remove('krestiki-playable'));
+    }
+
     ///////////////////////////////////////////////////
     //// Reaction to cometD notifications
 
     /*
         setupNotifications:
-        
+
         In this method, you associate each of your game notifications with your local method to handle it.
-        
+
         Note: game notification names correspond to "bga->notify->all" calls in your Game.php file.
-    
+
     */
     setupNotifications() {
-        console.log( 'notifications subscriptions setup' );
-        
-        // automatically listen to the notifications, based on the `notif_xxx` function on this class. 
+        console.log('notifications subscriptions setup');
+
+        // automatically listen to the notifications, based on the `notif_xxx` function on this class.
         // Uncomment the logger param to see debug information in the console about notifications.
         this.bga.notifications.setupPromiseNotifications({
             // logger: console.log
         });
     }
-    
-    // TODO: from this point and below, you can write your game notifications handling methods
-    
-    /*
-    Example:
-    async notif_cardPlayed( args ) {
-        // Note: args contains the arguments specified during you "notifyAllPlayers" / "notifyPlayer" PHP call
-        
-        // TODO: play the card in the user interface.
+
+    async notif_piecePlaced(args) {
+        const cell = parseInt(args.cell, 10);
+        const owner = parseInt(args.player_id, 10);
+        this.gamedatas.board[cell] = owner;
+        this.renderCell(cell, owner);
+        this.clearHighlights();
     }
+
+    ///////////////////////////////////////////////////
+    //// User actions
+
+    /*
+        Here, you are defining the action to trigger when the player clicks on a cell.
+        This action is only triggered from a user event, never from a notification.
     */
+    onBoardClick(e) {
+        const cellEl = e.target.closest('.krestiki-cell');
+        if (!cellEl || !cellEl.classList.contains('krestiki-playable')) {
+            return;
+        }
+        this.bga.actions.performAction('actPlace', {
+            cell: parseInt(cellEl.dataset.cell, 10),
+        });
+    }
 }
